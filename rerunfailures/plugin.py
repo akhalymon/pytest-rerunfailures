@@ -93,22 +93,52 @@ def pytest_runtest_protocol(item, nextitem):
     )
 
     for i in range(reruns+1):  # ensure at least one run of each item
+        # Execute the very test
         reports = runtestprotocol(item, nextitem=nextitem, log=False)
-        # break if setup and call pass
+        # Calculate duration
         current_test_duration = reports[0].duration+reports[1].duration+reports[2].duration
-        if reports[0].passed and reports[1].passed:
-            item.session.ordinary_tests_durations += current_test_duration
+
+        # Disable reruns and all connected features
+        if reruns==0:
             break
 
-        if current_test_duration > item.config.getoption("--timelimit"):
-            print "Test too long, skipping rerun"
-            break
-        if item.session.ordinary_tests_durations * (item.config.getoption("--rerun_time_threshold")/100.0) < item.session.rerun_tests_durations:
-            print "Rerun thresold reached, skipping rerun"
-            break
+
+        # If test finally passed, skip next tries
+        if not (reports[0].passed and reports[1].passed):
+            print "FAIL"
         else:
-            print "Test failed, rerun"
+            print "PASS"
+            break
+
+        # For debug purposes
+        print "Time spent on runs: ",item.session.ordinary_tests_durations
+        print "Time spent on reruns: ",item.session.rerun_tests_durations
+
+
+
+        # If this is not a first try, add duration to reruns time, else to runs time
+        if i>0:
             item.session.rerun_tests_durations += current_test_duration
+        else:
+            item.session.ordinary_tests_durations += current_test_duration
+
+
+        # If test duration exceeds time limit, skip
+        if current_test_duration > item.config.getoption("--timelimit"):
+            print "SKIP: Test too long, skipping rerun"
+            break
+
+        # If overall rerun time exceeds threshold, skip
+        if item.session.ordinary_tests_durations * (item.config.getoption("--rerun_time_threshold")/100.0) < item.session.rerun_tests_durations:
+            print "SKIP: Rerun thresold reached, skipping rerun"
+            break
+        if i<reruns+1:
+            pass
+            print "RERUN: Test failed, rerun"
+        else:
+            pass
+            print "FAIL: Test rerun count exceeded"
+
 
         # break if test marked xfail
         evalxfail = getattr(item, '_evalxfail', None)
@@ -121,9 +151,6 @@ def pytest_runtest_protocol(item, nextitem):
                 report.rerun = i
         item.ihook.pytest_runtest_logreport(report=report)
 
-    # For debug purposes
-    print "Time spent on runs: ",item.session.ordinary_tests_durations
-    print "Time spent on reruns: ",item.session.rerun_tests_durations
 
     # pytest_runtest_protocol returns True
     return True
