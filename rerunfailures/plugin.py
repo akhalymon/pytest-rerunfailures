@@ -96,7 +96,9 @@ def pytest_runtest_protocol(item, nextitem):
         # Execute the very test
         reports = runtestprotocol(item, nextitem=nextitem, log=False)
         # Calculate duration
-        current_test_duration = reports[0].duration+reports[1].duration+reports[2].duration
+        current_test_duration =0
+        for j in range(len(reports)):
+             current_test_duration+= reports[j].duration
         # If this is not a first try, add duration to reruns time, else to runs time
         if i>0:
             item.session.rerun_tests_durations += current_test_duration
@@ -129,7 +131,7 @@ def pytest_runtest_protocol(item, nextitem):
             break
 
         # If overall rerun time exceeds threshold, skip
-        if item.session.rerun_tests_durations > item.config.getoption("--rerun_time_threshold") :
+        if item.session.rerun_tests_durations+current_test_duration > item.config.getoption("--rerun_time_threshold") :
             print "SKIP: Rerun thresold reached, skipping rerun"
             break
         if i<reruns+1:
