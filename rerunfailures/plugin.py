@@ -17,15 +17,15 @@ def pytest_addoption(parser):
                      action="store",
                      dest="timelimit",
                      type="int",
-                     default=7200,
+                     default=0,
                      help="if test failed after timelimit, it will be not rerunned. Defaults to 7200 (2hrs)")
     group._addoption('--rerun_time_threshold',
                      action="store",
                      dest="rerun_time_threshold",
                      type="int",
-                     default=50,
-                     help="Allowed part of time in percents to spend on tests reruning. If total rerun time is  "
-                          "more then 'total_test_time'*value, then rerun is skipped")
+                     default=7200,
+                     help="Allowed  time in seconds to spend on tests reruning. If total rerun time is  "
+                          "more then threshold, then rerun is skipped")
 
 
 def pytest_configure(config):
@@ -97,6 +97,11 @@ def pytest_runtest_protocol(item, nextitem):
         reports = runtestprotocol(item, nextitem=nextitem, log=False)
         # Calculate duration
         current_test_duration = reports[0].duration+reports[1].duration+reports[2].duration
+        # If this is not a first try, add duration to reruns time, else to runs time
+        if i>0:
+            item.session.rerun_tests_durations += current_test_duration
+        else:
+            item.session.ordinary_tests_durations += current_test_duration
 
         # Disable reruns and all connected features
         if reruns==0:
@@ -116,11 +121,6 @@ def pytest_runtest_protocol(item, nextitem):
 
 
 
-        # If this is not a first try, add duration to reruns time, else to runs time
-        if i>0:
-            item.session.rerun_tests_durations += current_test_duration
-        else:
-            item.session.ordinary_tests_durations += current_test_duration
 
 
         # If test duration exceeds time limit, skip
@@ -129,7 +129,7 @@ def pytest_runtest_protocol(item, nextitem):
             break
 
         # If overall rerun time exceeds threshold, skip
-        if item.session.ordinary_tests_durations * (item.config.getoption("--rerun_time_threshold")/100.0) < item.session.rerun_tests_durations:
+        if item.session.rerun_tests_durations > item.config.getoption("--rerun_time_threshold") :
             print "SKIP: Rerun thresold reached, skipping rerun"
             break
         if i<reruns+1:
@@ -193,3 +193,7 @@ def show_rerun(terminalreporter, lines):
         for rep in rerun:
             pos = rep.nodeid
             lines.append("RERUN %s" % (pos,))
+
+    # Commit 1,3
+
+    # Commit 2
