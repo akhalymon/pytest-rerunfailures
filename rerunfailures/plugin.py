@@ -26,6 +26,11 @@ def pytest_addoption(parser):
                      default=7200,
                      help="Allowed  time in seconds to spend on tests reruning. If total rerun time is  "
                           "more then threshold, then rerun is skipped")
+    group._addoption('--skip_tests',
+                     action="store",
+                     dest="skip_tests",
+                     default="",
+                     help="Comma-separated list of tests that should be explicitly skipped. If test is parametrized")
 
 
 def pytest_configure(config):
@@ -92,55 +97,19 @@ def pytest_runtest_protocol(item, nextitem):
         nodeid=item.nodeid, location=item.location,
     )
 
-    for i in range(reruns+1):  # ensure at least one run of each item
+    for attempt in range(reruns+1):  # ensure at least one run of each item
         # Execute the very test
         reports = runtestprotocol(item, nextitem=nextitem, log=False)
-        # Calculate duration
-        current_test_duration =0
-        for j in range(len(reports)):
-             current_test_duration+= reports[j].duration
-        # If this is not a first try, add duration to reruns time, else to runs time
-        if i>0:
-            item.session.rerun_tests_durations += current_test_duration
+        update_test_durations(reports, item.session, attempt)
+        test_succeed, status_message = report_test_status(item, reports, attempt)
+        print status_message
+        if test_succeed:
+            break
         else:
-            item.session.ordinary_tests_durations += current_test_duration
-
-        # Disable reruns and all connected features
-        if reruns==0:
-            break
-
-
-        # If test finally passed, skip next tries
-        if not (reports[0].passed and reports[1].passed):
-            print "FAIL"
-        else:
-            print "PASS"
-            break
-
-        # For debug purposes
-        print "Time spent on runs: ",item.session.ordinary_tests_durations
-        print "Time spent on reruns: ",item.session.rerun_tests_durations
-
-
-
-
-
-        # If test duration exceeds time limit, skip
-        if current_test_duration > item.config.getoption("--timelimit"):
-            print "SKIP: Test too long, skipping rerun"
-            break
-
-        # If overall rerun time exceeds threshold, skip
-        if item.session.rerun_tests_durations+current_test_duration > item.config.getoption("--rerun_time_threshold") :
-            print "SKIP: Rerun thresold reached, skipping rerun"
-            break
-        if i<reruns+1:
-            pass
-            print "RERUN: Test failed, rerun"
-        else:
-            pass
-            print "FAIL: Test rerun count exceeded"
-
+            qualify, reason = qualify_for_rerun(item, reports, attempt)
+            if not(qualify):
+                print "rerun skipped, reason: "+reason+" testcase: " + item.nodeid
+                break
 
         # break if test marked xfail
         evalxfail = getattr(item, '_evalxfail', None)
@@ -149,13 +118,83 @@ def pytest_runtest_protocol(item, nextitem):
 
     for report in reports:
         if report.when in ("call"):
-            if i > 0:
-                report.rerun = i
+            if attempt > 0:
+                report.rerun = attempt
         item.ihook.pytest_runtest_logreport(report=report)
+
+        verbose_output(item)
 
 
     # pytest_runtest_protocol returns True
     return True
+
+def verbose_output(item):
+    if item.config.getoption("--verbose"):
+        # For debug purposes
+        print "\n    time spent on runs: ", item.session.ordinary_tests_durations
+        print "    time spent on reruns: \n", item.session.rerun_tests_durations
+
+
+def report_test_status(item, reports, attempt):
+    is_rerun = attempt > 0
+    status_message = []
+    test_succeed = reports[0].passed and reports[1].passed
+
+    if test_succeed and not is_rerun:
+        status_message.append("PASS: " + item.nodeid)
+    if test_succeed and is_rerun:
+        status_message.append("PASS_ON_RERUN: " + item.nodeid)
+    if not test_succeed and not is_rerun:
+        status_message.append("FAIL: " + item.nodeid)
+    if not test_succeed and is_rerun:
+        status_message.append("FAIL_ON_RERUN: " + item.nodeid)
+    return test_succeed, "".join(status_message)
+
+
+def qualify_for_rerun(item, reports, attempt):
+    result = True
+    reason = []
+    tests_to_skip = [testname.strip() for testname in item.config.getoption("--skip_tests").split(',')]
+    for testname in tests_to_skip:
+        if testname in item.location:
+            result = False
+            reason.append("rerun explicitly disabled for this test case")
+            return result, "".join(reason)
+
+    if attempt > item.config.getoption("--reruns"):
+        result = False
+        reason.append("failure rerun attempt limit reached ")
+        return result, "".join(reason)
+
+
+    # If test duration exceeds time limit, skip
+    if get_test_duration(reports) > item.config.getoption("--timelimit"):
+        result = False
+        reason.append("test exceeds timelimit")
+        return result, "".join(reason)
+
+    # If overall rerun time exceeds threshold, skip
+    if item.session.rerun_tests_durations+get_test_duration(reports) > item.config.getoption("--rerun_time_threshold"):
+        result = False
+        reason.append("total rerun threshold reached")
+        return result, "".join(reason)
+
+    return result, "".join(reason)
+
+def update_test_durations(reports, session, attempt):
+    current_test_duration = get_test_duration(reports)
+    # If this is not a first try, add duration to reruns time, else to runs time
+    if attempt>1:
+        session.rerun_tests_durations += current_test_duration
+    else:
+        session.ordinary_tests_durations += current_test_duration
+
+def get_test_duration(reports):
+    current_test_duration = 0
+    for j in range(len(reports)):
+         current_test_duration+= reports[j].duration
+    return current_test_duration
+
 
 
 def pytest_report_teststatus(report):
@@ -165,9 +204,9 @@ def pytest_report_teststatus(report):
     if report.when in ("call"):
         if hasattr(report, "rerun") and report.rerun > 0:
             if report.outcome == "failed":
-                return "failed", "F", "FAILED"
+                return "rerun failed", "e", "FAILED"
             if report.outcome == "passed":
-                return "rerun", "R", "RERUN"
+                return "rerun passed", "R", "PASSED_ON_RERUN"
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -179,12 +218,17 @@ def pytest_terminal_summary(terminalreporter):
         return
 
     lines = []
-    for char in tr.reportchars:
-        if char in "rR":
-            show_rerun(terminalreporter, lines)
 
+    tr._tw.sep("=", "PASSED ON RERUN")
+    show_simple(terminalreporter, lines, 'rerun passed', "RERUN_PASSED %s")
     if lines:
-        tr._tw.sep("=", "rerun test summary info")
+        for line in lines:
+            tr._tw.line(line)
+
+    lines = []
+    tr._tw.sep("=", "FAILED ON RERUN")
+    show_simple(terminalreporter, lines, 'rerun failed', "RERUN_FAILED %s")
+    if lines:
         for line in lines:
             tr._tw.line(line)
 
@@ -196,6 +240,10 @@ def show_rerun(terminalreporter, lines):
             pos = rep.nodeid
             lines.append("RERUN %s" % (pos,))
 
-    # Commit 1,3
 
-    # Commit 2
+def show_simple(terminalreporter, lines, stat, format):
+    failed = terminalreporter.stats.get(stat)
+    if failed:
+        for rep in failed:
+            pos = rep.nodeid + " " + "%.2f" % rep.duration
+            lines.append(format %(pos, ))
