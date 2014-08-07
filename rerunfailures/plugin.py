@@ -50,6 +50,9 @@ def pytest_configure(config):
         # ...and replace it with our own rerun info reporter.
         config.pluginmanager.unregister(standard_reporter)
         config.pluginmanager.register(reruninfo_reporter, 'terminalreporter')
+    else:
+        rerun_plugin = config.pluginmanager.getplugin('rerunfailures')
+        config.pluginmanager.unregister(rerun_plugin)
 
 # making sure the options make sense
 # should run before / at the begining of pytest_cmdline_main
@@ -69,7 +72,7 @@ def pytest_sessionstart(session):
 def pytest_sessionfinish(session, exitstatus):
     items = session.items
     for item in items:
-        while items.count(item)>1:
+        while items.count(item) > 1:
             items.remove(item)
 
 def pytest_collection_modifyitems(session, config, items):
@@ -94,6 +97,7 @@ def pytest_runtest_protocol(item, nextitem):
     update_test_durations(reports, item.session, item.attempt)
     test_succeed, status_message = report_test_status(item, reports)
     qualify_rerun = False
+    # print item.nodeid, " attepmt " + str(item.attempt)
     if test_succeed:
         pass
     else:
@@ -103,7 +107,6 @@ def pytest_runtest_protocol(item, nextitem):
         else:
             schedule_item_rerun(item, item.config)
             qualify_rerun = True
-            print item.nodeid, " attepmt " + str(item.attempt)
 
     for report in reports:
         if report.when in ("call"):
