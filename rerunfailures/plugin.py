@@ -192,6 +192,7 @@ def qualify_for_rerun(item, reports):
         reason.append("test exceeds timelimit")
         return False, "".join(reason)
 
+    # TODO this limitation will not work correctly with --rerun_after option
     # If overall rerun time exceeds threshold, skip
     if item.session.rerun_tests_durations + get_test_duration(reports) > item.config.option.rerun_time_threshold:
         reason.append("total rerun threshold reached")
