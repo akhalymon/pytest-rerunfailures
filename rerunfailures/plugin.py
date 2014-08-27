@@ -102,12 +102,20 @@ def pytest_runtest_protocol(item, nextitem):
     item.ihook.pytest_runtest_logstart(
         nodeid=item.nodeid, location=item.location,
     )
-    # Do test execution
-    reports = runtestprotocol(item, nextitem=nextitem, log=False)
+    # If rerun after is enabled, we should skip already scheduled reruns (that was scheduled before threshold reached)
+    if  item.attempt > 1 and item.config.option.rerun_after and item.session.rerun_tests_durations > item.config.option.rerun_time_threshold:
+        reason = "total rerun threshold reached"
+        print "rerun skipped, reason: " + reason + " testcase: " + item.nodeid
+        # Do not touch item report status here
+        # Just decrease attempt count (was increased while scheduling test to rerun
+        item.attempt -= 1
+    else:
+        # Do test execution and assign report status
+        item.reports = runtestprotocol(item, nextitem=nextitem, log=False)
     # Update cumulative test durations
-    update_test_durations(reports, item.session, item.attempt)
+    update_test_durations(item.reports, item.session, item.attempt)
     # Get test status (aware of rerun)
-    test_succeed, status_message = report_test_status(item, reports)
+    test_succeed, status_message = report_test_status(item, item.reports)
 
     if item.config.option.verbose:
         print item.nodeid, " attepmt " + str(item.attempt)
@@ -117,7 +125,7 @@ def pytest_runtest_protocol(item, nextitem):
         pass
     else:
         # Check rerun conditions
-        qualify, reason = qualify_for_rerun(item, reports)
+        qualify, reason = qualify_for_rerun(item, item.reports)
         if not (qualify):
             print "rerun skipped, reason: " + reason + " testcase: " + item.nodeid
         else:
@@ -126,7 +134,7 @@ def pytest_runtest_protocol(item, nextitem):
             qualify_rerun = True
 
     # Update report attempt field (to report these values)
-    for report in reports:
+    for report in item.reports:
         # Only update for "call" (not setup and teardown)
         if report.when in ("call"):
             report.attempt = item.attempt
