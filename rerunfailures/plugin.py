@@ -115,13 +115,13 @@ def pytest_runtest_protocol(item, nextitem):
     # Update cumulative test durations
     update_test_durations(item.reports, item.session, item.attempt)
     # Get test status (aware of rerun)
-    test_succeed, status_message = report_test_status(item, item.reports)
+    test_succeed, test_aborted, status_message = report_test_status(item, item.reports)
 
     if item.config.option.verbose:
         print item.nodeid, " attepmt " + str(item.attempt)
 
     qualify_rerun = False
-    if test_succeed:
+    if test_succeed or test_aborted:
         pass
     else:
         # Check rerun conditions
@@ -159,16 +159,23 @@ def report_test_status(item, reports):
     is_rerun = item.attempt > 1
     status_message = []
     test_succeed = reports[0].passed and reports[1].passed
+    test_aborted = not reports[0].passed
 
     if test_succeed and not is_rerun:
         status_message.append("PASS: " + item.nodeid)
     if test_succeed and is_rerun:
         status_message.append("PASS_ON_RERUN: " + item.nodeid)
-    if not test_succeed and not is_rerun:
+    if test_aborted:
+        status_message.append("ABORTED: " + item.nodeid)
+
+    if not (test_succeed or test_aborted) and not is_rerun:
         status_message.append("FAIL: " + item.nodeid)
-    if not test_succeed and is_rerun:
+
+    if not (test_succeed or test_aborted) and is_rerun:
         status_message.append("FAIL_ON_RERUN: " + item.nodeid)
-    return test_succeed, "".join(status_message)
+
+    return test_succeed, test_aborted, "".join(status_message)
+
 
 # Depending on option, schedule rerun just after this item, or at the run end
 def schedule_item_rerun(item, config):
