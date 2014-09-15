@@ -165,7 +165,7 @@ def report_test_status(item, reports):
         status_message.append("PASS: " + item.nodeid)
     if test_succeed and is_rerun:
         status_message.append("PASS_ON_RERUN: " + item.nodeid)
-    if test_aborted:
+    if test_aborted and not is_rerun:
         status_message.append("ABORTED: " + item.nodeid)
 
     if not (test_succeed or test_aborted) and not is_rerun:
@@ -173,6 +173,9 @@ def report_test_status(item, reports):
 
     if not (test_succeed or test_aborted) and is_rerun:
         status_message.append("FAIL_ON_RERUN: " + item.nodeid)
+
+    if test_aborted and is_rerun:
+        status_message.append("ABORTED ON RERUN: " + item.nodeid)
 
     return test_succeed, test_aborted, "".join(status_message)
 
@@ -207,7 +210,6 @@ def qualify_for_rerun(item, reports):
         reason.append("test exceeds timelimit")
         return False, "".join(reason)
 
-    # TODO this limitation will not work correctly with --rerun_after option
     # If overall rerun time exceeds threshold, skip
     if item.session.rerun_tests_durations + get_test_duration(reports) > item.config.option.rerun_time_threshold:
         reason.append("total rerun threshold reached")
@@ -242,9 +244,11 @@ def pytest_report_teststatus(report):
     if report.when in ("call"):
         if report.attempt > 1:
             if report.outcome == "failed":
-                return "rerun failed", "e", "FAILED"
+                return "rerun failed", "e", "FAILED_ON_RERUN"
             if report.outcome == "passed":
                 return "rerun passed", "R", "PASSED_ON_RERUN"
+            if report.outcome == "aborted":
+                return "rerun aborted", "A", "ABORTED_ON_RERUN"
 
 # Adopted from https://github.com/jpvanhal/pytest-instafail/blob/master/pytest_instafail.py
 # With slight changes
@@ -290,6 +294,7 @@ class RerunInfoTerminalReporter(TerminalReporter):
             self.summary_failures()
             # Added summary for reruns
             self.summary_rerun_failed()
+            self.summary_rerun_aborted()
             self.summary_rerun_passed()
             self.summary_hints()
             self.config.hook.pytest_terminal_summary(terminalreporter=self)
@@ -317,6 +322,21 @@ class RerunInfoTerminalReporter(TerminalReporter):
             if not reports:
                 return
             self.write_sep("=", "FAILED ON RERUN")
+            for rep in reports:
+                if self.config.option.tbstyle == "line":
+                    line = self._getcrashline(rep)
+                    self.write_line(line)
+                else:
+                    msg = self._getfailureheadline(rep)
+                    self.write_sep("_", msg)
+                    self._outrep_summary(rep)
+
+    def summary_rerun_aborted(self):
+        if self.config.option.tbstyle != "no":
+            reports = self.getreports('rerun aborted')
+            if not reports:
+                return
+            self.write_sep("=", "ABORTED ON RERUN")
             for rep in reports:
                 if self.config.option.tbstyle == "line":
                     line = self._getcrashline(rep)
