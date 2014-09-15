@@ -296,7 +296,6 @@ class RerunInfoTerminalReporter(TerminalReporter):
             self.summary_rerun_failed()
             self.summary_rerun_aborted()
             self.summary_rerun_passed()
-            self.summary_hints()
             self.config.hook.pytest_terminal_summary(terminalreporter=self)
         if exitstatus == 2:
             self._report_keyboardinterrupt()
